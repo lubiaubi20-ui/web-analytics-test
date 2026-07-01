@@ -1,0 +1,505 @@
+<!DOCTYPE html>
+<html lang="az">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Qaimə Sistemi</title>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+<style>
+*{box-sizing:border-box;font-family:Arial,sans-serif}
+body{margin:0;background:#f2f2f2;color:#222}
+input,select,textarea,button{font-size:15px;padding:8px;border:1px solid #ccc;border-radius:5px;width:100%;margin-top:4px}
+button{background:#2563eb;color:#fff;border:none;cursor:pointer;width:auto;padding:8px 14px}
+button.sec{background:#666}
+button.danger{background:#c0392b}
+label{font-size:13px;color:#555;margin-top:8px;display:block}
+.hidden{display:none!important}
+#loginBox{max-width:320px;margin:80px auto;background:#fff;padding:20px;border-radius:8px}
+header{background:#1e293b;color:#fff;padding:10px 14px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap}
+header .tabs{display:flex;gap:6px;flex-wrap:wrap}
+header .tabs button{background:#334155;padding:6px 10px}
+header .tabs button.active{background:#2563eb}
+#userInfo{font-size:13px}
+main{padding:12px;max-width:900px;margin:0 auto}
+.card{background:#fff;padding:14px;border-radius:8px;margin-bottom:12px}
+.row{border:1px solid #ddd;border-radius:6px;margin-bottom:6px;padding:8px;background:#fff}
+.row.tecili{border:2px solid #c0392b}
+.row .line{display:flex;gap:10px;align-items:center;font-size:14px;cursor:pointer;flex-wrap:wrap}
+.row .line b{color:#2563eb}
+.row .details{margin-top:8px;font-size:13px;color:#444;border-top:1px solid #eee;padding-top:8px}
+.thumb{width:50px;height:50px;object-fit:cover;border-radius:4px;cursor:pointer}
+.tabbar{display:flex;gap:6px;margin-bottom:10px;flex-wrap:wrap}
+.tabbar button{background:#e2e8f0;color:#222;padding:6px 10px}
+.tabbar button.active{background:#2563eb;color:#fff}
+.modal{position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,.7);display:flex;align-items:center;justify-content:center;z-index:50;padding:10px}
+.modal .box{background:#fff;padding:16px;border-radius:8px;max-width:420px;width:100%;max-height:90vh;overflow:auto}
+#viewerModal{position:fixed;top:0;left:0;right:0;bottom:0;background:#000;display:flex;flex-direction:column;z-index:60}
+#viewerModal img{max-width:100%;max-height:80vh;margin:auto;transition:transform .2s}
+#viewerModal .bar{display:flex;gap:8px;padding:10px;justify-content:center;flex-wrap:wrap}
+.badge{background:#c0392b;color:#fff;border-radius:12px;padding:2px 8px;font-size:12px}
+.small{font-size:12px;color:#666}
+.imgpick{display:flex;gap:6px;flex-wrap:wrap;margin-top:6px}
+.imgpick img{width:60px;height:60px;object-fit:cover;border-radius:4px}
+table{width:100%;border-collapse:collapse;font-size:13px}
+td,th{border:1px solid #ddd;padding:6px;text-align:left}
+.bar-chart div.bg{background:#eee;border-radius:3px;margin:4px 0}
+.bar-chart div.fg{background:#2563eb;height:14px;border-radius:3px;color:#fff;font-size:11px;padding-left:4px}
+</style>
+</head>
+<body>
+
+<div id="loginBox">
+  <h3>Giriş</h3>
+  <label>İstifadəçi adı</label>
+  <input id="loginUser">
+  <label>Şifrə</label>
+  <input id="loginPass" type="password">
+  <button style="margin-top:12px;width:100%" onclick="doLogin()">Daxil ol</button>
+  <div id="loginErr" class="small" style="color:red"></div>
+</div>
+
+<div id="app" class="hidden">
+<header>
+  <div class="tabs" id="navTabs"></div>
+  <div id="userInfo"></div>
+</header>
+<main id="main"></main>
+</div>
+
+<div id="modalRoot"></div>
+
+<script>
+const firebaseConfig = {
+  apiKey: "AIzaSyD-w-HjawIvU8u7QvpjEhlgq2K2QXzs4bM",
+  authDomain: "techizat-8f0bc.firebaseapp.com",
+  projectId: "techizat-8f0bc",
+  storageBucket: "techizat-8f0bc.firebasestorage.app",
+  messagingSenderId: "74888831335",
+  appId: "1:74888831335:web:5257610bfa03ab67b14fc2"
+};
+firebase.initializeApp(firebaseConfig);
+const db = firebase.firestore();
+const CLOUD_NAME='hpdyrlnl', UPLOAD_PRESET='qaimeler';
+
+let currentUser = JSON.parse(localStorage.getItem('cu')||'null');
+let qaimeler = [];
+let curTab = 'aktiv';
+let curNav = null;
+let selected = new Set();
+let dismissed = new Set();
+let pickedFiles = []; // {blob, previewUrl}
+
+// ---------- INIT / SEED ----------
+async function seedUsers(){
+  const defs = [
+    {id:'sifaris', password:'1234', role:'sifarisci', name:'Sifarişçi'},
+    {id:'sistem', password:'1234', role:'anbar', name:'Anbar İşçisi'},
+    {id:'korporativ', password:'1234', role:'korporativ', name:'Korporativ'}
+  ];
+  for(const u of defs){
+    const ref = db.collection('users').doc(u.id);
+    const snap = await ref.get();
+    if(!snap.exists) await ref.set({password:u.password, role:u.role, name:u.name});
+  }
+}
+seedUsers();
+
+async function doLogin(){
+  const u = document.getElementById('loginUser').value.trim();
+  const p = document.getElementById('loginPass').value.trim();
+  const snap = await db.collection('users').doc(u).get();
+  if(!snap.exists || snap.data().password !== p){
+    document.getElementById('loginErr').innerText = 'İstifadəçi adı və ya şifrə yanlışdır';
+    return;
+  }
+  currentUser = {username:u, role:snap.data().role, name:snap.data().name};
+  localStorage.setItem('cu', JSON.stringify(currentUser));
+  boot();
+}
+function logout(){ localStorage.removeItem('cu'); location.reload(); }
+
+function boot(){
+  if(!currentUser) return;
+  document.getElementById('loginBox').classList.add('hidden');
+  document.getElementById('app').classList.remove('hidden');
+  document.getElementById('userInfo').innerText = currentUser.name + ' çıxış';
+  document.getElementById('userInfo').style.cursor='pointer';
+  document.getElementById('userInfo').onclick = logout;
+  setupNav();
+  db.collection('qaimeler').orderBy('createdAt','desc').onSnapshot(snap=>{
+    qaimeler = snap.docs.map(d=>({id:d.id, ...d.data()}));
+    render();
+    if(currentUser.role==='sifarisci') checkNotifications();
+  });
+}
+if(currentUser) boot();
+
+function setupNav(){
+  let tabs = [];
+  if(currentUser.role==='sifarisci') tabs=[['add','Qaimə Əlavə Et'],['mine','Mənim Qaimlərim'],['stats','Analitika']];
+  if(currentUser.role==='anbar') tabs=[['list','Qaimlər'],['stats','Analitika']];
+  if(currentUser.role==='korporativ') tabs=[['stats','Analitika']];
+  curNav = tabs[0][0];
+  const el = document.getElementById('navTabs');
+  el.innerHTML = tabs.map(t=>`<button data-n="${t[0]}" onclick="setNav('${t[0]}')">${t[1]}</button>`).join('');
+  render();
+}
+function setNav(n){ curNav=n; render(); }
+
+// ---------- HELPERS ----------
+function fmtDate(ts){ if(!ts) return ''; const d = ts.toDate?ts.toDate():new Date(ts); return d.toLocaleDateString('az-AZ')+' '+d.toLocaleTimeString('az-AZ',{hour:'2-digit',minute:'2-digit'}); }
+function isToday(ts){ if(!ts) return false; const d=ts.toDate?ts.toDate():new Date(ts); const t=new Date(); return d.toDateString()===t.toDateString(); }
+function daysAgo(ts){ if(!ts) return 0; const d=ts.toDate?ts.toDate():new Date(ts); return (Date.now()-d.getTime())/86400000; }
+function isTecili(q){ return q.tecili===true || (q.status==='yeni' && daysAgo(q.createdAt)>3); }
+function hasOpenProblem(q){ return q.problem && !q.problem.solved; }
+
+// ---------- RENDER ROOT ----------
+function render(){
+  document.querySelectorAll('#navTabs button').forEach(b=>b.classList.toggle('active', b.dataset.n===curNav));
+  const m = document.getElementById('main');
+  if(currentUser.role==='sifarisci'){
+    if(curNav==='add') m.innerHTML = viewAddForm();
+    else if(curNav==='mine') m.innerHTML = viewMine();
+    else m.innerHTML = viewStats();
+  } else if(currentUser.role==='anbar'){
+    if(curNav==='list') m.innerHTML = viewAnbarList();
+    else m.innerHTML = viewStats();
+  } else {
+    m.innerHTML = viewStats();
+  }
+}
+
+// ---------- ADD QAIME (Sifarişçi) ----------
+function viewAddForm(){
+  const kimUcunList = [...new Set(qaimeler.map(q=>q.kimUcun).filter(Boolean))];
+  const anbarList = [...new Set(qaimeler.map(q=>q.anbar).filter(Boolean))];
+  return `<div class="card">
+    <h3>Qaimə Əlavə Et</h3>
+    <label>Sifariş Verən</label>
+    <input value="${currentUser.name}" disabled>
+    <label>Hansı anbara alındı *</label>
+    <input id="f_anbar" list="dl_anbar">
+    <datalist id="dl_anbar">${anbarList.map(a=>`<option value="${a}">`).join('')}</datalist>
+    <label>Kim üçün alındı *</label>
+    <input id="f_kim" list="dl_kim">
+    <datalist id="dl_kim">${kimUcunList.map(a=>`<option value="${a}">`).join('')}</datalist>
+    <label>Ödəniş tipi *</label>
+    <select id="f_odenis"><option value="">Seçin</option><option>Köçürmə</option><option>Nağd</option></select>
+    <label>Qeyd</label>
+    <textarea id="f_qeyd" rows="2"></textarea>
+    <label><input type="checkbox" id="f_tecili" style="width:auto"> Təcilidir</label>
+    <label>Şəkillər</label>
+    <div style="display:flex;gap:6px">
+      <input type="file" id="f_cam" accept="image/*" capture="environment" multiple style="display:none" onchange="onPick(event)">
+      <input type="file" id="f_gal" accept="image/*" multiple style="display:none" onchange="onPick(event)">
+      <button type="button" onclick="document.getElementById('f_cam').click()">📷 Şəkil çək</button>
+      <button type="button" class="sec" onclick="document.getElementById('f_gal').click()">🖼 Fayldan seç</button>
+    </div>
+    <div class="imgpick" id="picPreview"></div>
+    <div id="addErr" class="small" style="color:red"></div>
+    <button style="margin-top:12px" onclick="submitQaime()">Əlavə Et</button>
+  </div>`;
+}
+function onPick(e){
+  [...e.target.files].forEach(f=>{
+    const url = URL.createObjectURL(f);
+    pickedFiles.push({file:f, url});
+  });
+  e.target.value='';
+  renderPreview();
+}
+function renderPreview(){
+  document.getElementById('picPreview').innerHTML = pickedFiles.map((p,i)=>
+    `<div style="position:relative"><img src="${p.url}"><button onclick="pickedFiles.splice(${i},1);renderPreview()" style="position:absolute;top:-6px;right:-6px;width:20px;height:20px;padding:0;border-radius:50%;background:#c0392b">×</button></div>`
+  ).join('');
+}
+function compressImage(file, maxSize=1200, quality=0.7){
+  return new Promise(resolve=>{
+    const reader = new FileReader();
+    reader.onload = e=>{
+      const img = new Image();
+      img.onload = ()=>{
+        let w=img.width, h=img.height;
+        if(w>h){ if(w>maxSize){h=h*maxSize/w; w=maxSize;} } else { if(h>maxSize){w=w*maxSize/h; h=maxSize;} }
+        const c = document.createElement('canvas'); c.width=w; c.height=h;
+        c.getContext('2d').drawImage(img,0,0,w,h);
+        c.toBlob(b=>resolve(b), 'image/jpeg', quality);
+      };
+      img.src = e.target.result;
+    };
+    reader.readAsDataURL(file);
+  });
+}
+async function uploadToCloudinary(blob){
+  const fd = new FormData();
+  fd.append('file', blob);
+  fd.append('upload_preset', UPLOAD_PRESET);
+  const res = await fetch(`https://api.cloudinary.com/v1_1/${CLOUD_NAME}/image/upload`, {method:'POST', body:fd});
+  const data = await res.json();
+  return data.secure_url;
+}
+async function submitQaime(){
+  const anbar = document.getElementById('f_anbar').value.trim();
+  const kim = document.getElementById('f_kim').value.trim();
+  const odenis = document.getElementById('f_odenis').value;
+  const qeyd = document.getElementById('f_qeyd').value.trim();
+  const tecili = document.getElementById('f_tecili').checked;
+  const err = document.getElementById('addErr');
+  if(!anbar || !kim || !odenis){ err.innerText='Anbar, kim üçün və ödəniş tipi mütləqdir'; return; }
+  err.innerText = 'Yüklənir...';
+  const photos = [];
+  for(const p of pickedFiles){
+    const blob = await compressImage(p.file);
+    const url = await uploadToCloudinary(blob);
+    photos.push(url);
+  }
+  const no = await db.runTransaction(async t=>{
+    const ref = db.collection('meta').doc('counter');
+    const snap = await t.get(ref);
+    const val = (snap.exists? snap.data().value:0)+1;
+    t.set(ref,{value:val});
+    return val;
+  });
+  await db.collection('qaimeler').add({
+    no, sifarisVeren: currentUser.name, anbar, kimUcun: kim, odenisTipi: odenis, qeyd,
+    tecili, photos, status:'yeni', isleyen:null, problem:null,
+    createdAt: firebase.firestore.FieldValue.serverTimestamp(), medaxilNo:null
+  });
+  pickedFiles = [];
+  err.innerText = '';
+  curNav='mine'; render();
+}
+
+// ---------- MINE (Sifarişçi) ----------
+function viewMine(){
+  const mine = qaimeler.filter(q=>q.sifarisVeren===currentUser.name);
+  return `<div class="card"><h3>Mənim Qaimlərim (${mine.length})</h3>${mine.map(rowHtml).join('') || '<div class="small">Yoxdur</div>'}</div>`;
+}
+
+// ---------- ANBAR LIST ----------
+function viewAnbarList(){
+  const problemCount = qaimeler.filter(q=>hasOpenProblem(q)).length;
+  const tabs = [['aktiv','Aktiv'],['medaxil','Mədaxil Olan'],['tecili','Təcili'],['problemli','Problemli']];
+  let list = filterByTab(curTab);
+  const search = document.getElementById('anbarSearch')?.value || '';
+  if(search) list = list.filter(q=> String(q.no).includes(search) || (q.anbar||'').toLowerCase().includes(search.toLowerCase()));
+  list = list.slice().sort((a,b)=> (isTecili(b)?1:0)-(isTecili(a)?1:0));
+  return `<div class="card">
+    <input id="anbarSearch" placeholder="Axtar (qaimə № / anbar)" value="${search}" oninput="render()">
+    <div class="tabbar" style="margin-top:10px">${tabs.map(t=>`<button class="${curTab===t[0]?'active':''}" onclick="curTab='${t[0]}';render()">${t[1]}${t[0]==='problemli'&&problemCount?` <span class="badge">${problemCount}</span>`:''}</button>`).join('')}</div>
+    ${curTab==='aktiv'?`<button onclick="bulkTake()">İşlə (seçilənlər: ${selected.size})</button>`:''}
+    <div style="margin-top:10px">${list.map(q=>rowHtml(q,true)).join('') || '<div class="small">Yoxdur</div>'}</div>
+  </div>`;
+}
+function filterByTab(tab){
+  if(tab==='medaxil') return qaimeler.filter(q=>q.status==='medaxil');
+  if(tab==='problemli') return qaimeler.filter(q=>hasOpenProblem(q));
+  if(tab==='tecili') return qaimeler.filter(q=>isTecili(q) && q.status!=='medaxil' && !hasOpenProblem(q));
+  return qaimeler.filter(q=>q.status!=='medaxil' && !hasOpenProblem(q));
+}
+
+// ---------- ROW ----------
+function rowHtml(q, anbarMode){
+  const tecili = isTecili(q);
+  const problem = hasOpenProblem(q);
+  const checkbox = (anbarMode && curTab==='aktiv') ? `<input type="checkbox" style="width:auto" ${selected.has(q.id)?'checked':''} onclick="event.stopPropagation();toggleSel('${q.id}')">` : '';
+  return `<div class="row ${tecili?'tecili':''}">
+    <div class="line" onclick="toggleDetails('${q.id}')">
+      ${checkbox}
+      <b>Qaimə_${q.no}</b>
+      <span>${q.sifarisVeren}</span>
+      <span>${q.anbar}</span>
+      <span>${q.kimUcun}</span>
+      <span>${q.odenisTipi}</span>
+      ${problem?'<span class="badge">Problem</span>':''}
+      ${q.photos && q.photos[0] ? `<img class="thumb" src="${q.photos[0]}" onclick="event.stopPropagation();openViewer(${JSON.stringify(q.photos).replace(/"/g,'&quot;')},0)">`:''}
+    </div>
+    <div class="details hidden" id="det_${q.id}">
+      <div>Tarix: ${fmtDate(q.createdAt)}</div>
+      <div>Status: ${q.status}${q.isleyen?(' — İşləyir: '+q.isleyen):''}</div>
+      ${q.qeyd?`<div>Qeyd: ${q.qeyd}</div>`:''}
+      ${q.medaxilNo?`<div>Mədaxil №: ${q.medaxilNo}</div>`:''}
+      ${problem?`<div style="color:#c0392b">Problem: ${q.problem.text}</div>`:''}
+      ${q.problem && q.problem.solved?`<div style="color:green">Həll: ${q.problem.solution}</div>`:''}
+      ${anbarActions(q)}
+      ${sifarisciActions(q)}
+    </div>
+  </div>`;
+}
+function anbarActions(q){
+  if(currentUser.role!=='anbar') return '';
+  let html = '';
+  if(q.status==='islemede' && q.isleyen===currentUser.name && !hasOpenProblem(q)){
+    html += `<div style="margin-top:6px;display:flex;gap:6px;flex-wrap:wrap">
+      <button class="danger" onclick="openProblemModal('${q.id}')">Problem bildir</button>
+      <button onclick="openMedaxilModal('${q.id}')">Mədaxil edildi</button>
+    </div>`;
+  }
+  return html;
+}
+function sifarisciActions(q){
+  if(currentUser.role!=='sifarisci') return '';
+  if(hasOpenProblem(q) && q.sifarisVeren===currentUser.name){
+    return `<button class="danger" style="margin-top:6px" onclick="openResolveModal('${q.id}')">Problemi Həll Et</button>`;
+  }
+  return '';
+}
+function toggleDetails(id){ document.getElementById('det_'+id).classList.toggle('hidden'); }
+function toggleSel(id){ selected.has(id)?selected.delete(id):selected.add(id); render(); }
+async function bulkTake(){
+  if(selected.size===0) return;
+  const batch = db.batch();
+  selected.forEach(id=>{
+    batch.update(db.collection('qaimeler').doc(id), {status:'islemede', isleyen:currentUser.name, tookAt: firebase.firestore.FieldValue.serverTimestamp()});
+  });
+  await batch.commit();
+  selected.clear();
+  render();
+}
+
+// ---------- PHOTO VIEWER ----------
+function openViewer(photos, idx){
+  let rotate = 0;
+  const root = document.getElementById('modalRoot');
+  function draw(){
+    root.innerHTML = `<div id="viewerModal">
+      <div class="bar">
+        <button class="sec" onclick="closeModal()">Bağla</button>
+        <button onclick="viewerNav(-1)">◀</button>
+        <span style="color:#fff;align-self:center">${idx+1}/${photos.length}</span>
+        <button onclick="viewerNav(1)">▶</button>
+        <button onclick="viewerRotate()">⟳ Döndər</button>
+        <a href="${photos[idx]}" target="_blank"><button>Yüklə</button></a>
+      </div>
+      <img src="${photos[idx]}" style="transform:rotate(${rotate}deg)">
+    </div>`;
+  }
+  window.viewerNav = d=>{ idx=(idx+d+photos.length)%photos.length; rotate=0; draw(); };
+  window.viewerRotate = ()=>{ rotate=(rotate+90)%360; draw(); };
+  draw();
+}
+function closeModal(){ document.getElementById('modalRoot').innerHTML=''; }
+
+// ---------- PROBLEM / MEDAXIL MODALS ----------
+function openProblemModal(id){
+  document.getElementById('modalRoot').innerHTML = `<div class="modal"><div class="box">
+    <h3>Problem bildir</h3>
+    <textarea id="probText" rows="3" placeholder="Problemi yazın"></textarea>
+    <div style="display:flex;gap:6px;margin-top:10px">
+      <button onclick="closeModal()" class="sec">Ləğv et</button>
+      <button onclick="saveProblem('${id}')">Göndər</button>
+    </div>
+  </div></div>`;
+}
+async function saveProblem(id){
+  const text = document.getElementById('probText').value.trim();
+  if(!text) return;
+  await db.collection('qaimeler').doc(id).update({problem:{text, solved:false}});
+  closeModal();
+}
+function openMedaxilModal(id){
+  document.getElementById('modalRoot').innerHTML = `<div class="modal"><div class="box">
+    <h3>Mədaxil edildi</h3>
+    <label>Qaimə nömrəsi *</label>
+    <input id="medNo">
+    <div style="display:flex;gap:6px;margin-top:10px">
+      <button onclick="closeModal()" class="sec">Ləğv et</button>
+      <button onclick="saveMedaxil('${id}')">OK</button>
+    </div>
+  </div></div>`;
+}
+async function saveMedaxil(id){
+  const no = document.getElementById('medNo').value.trim();
+  if(!no) return;
+  await db.collection('qaimeler').doc(id).update({status:'medaxil', medaxilNo:no});
+  closeModal();
+}
+function openResolveModal(id){
+  const q = qaimeler.find(x=>x.id===id);
+  document.getElementById('modalRoot').innerHTML = `<div class="modal"><div class="box">
+    <h3>Qaimə_${q.no} — Problem</h3>
+    ${q.photos&&q.photos[0]?`<img src="${q.photos[0]}" style="width:100%;border-radius:6px;cursor:pointer" onclick="openViewer(${JSON.stringify(q.photos).replace(/"/g,'&quot;')},0)">`:''}
+    <div style="color:#c0392b;margin-top:8px">${q.problem.text}</div>
+    <label>Problemin həlli *</label>
+    <textarea id="solText" rows="3"></textarea>
+    <div style="display:flex;gap:6px;margin-top:10px">
+      <button onclick="closeModal()" class="sec">Bağla</button>
+      <button onclick="saveResolve('${id}')">Həll edildi</button>
+    </div>
+  </div></div>`;
+}
+async function saveResolve(id){
+  const sol = document.getElementById('solText').value.trim();
+  if(!sol) return;
+  const q = qaimeler.find(x=>x.id===id);
+  await db.collection('qaimeler').doc(id).update({problem:{text:q.problem.text, solved:true, solution:sol}});
+  dismissed.add(id);
+  closeModal();
+}
+
+// ---------- NOTIFICATIONS ----------
+function checkNotifications(){
+  const mine = qaimeler.filter(q=>hasOpenProblem(q) && q.sifarisVeren===currentUser.name && !dismissed.has(q.id));
+  if(mine.length>0 && !document.getElementById('modalRoot').innerHTML){
+    document.getElementById('modalRoot').innerHTML = `<div class="modal"><div class="box">
+      <h3>Problemli qaimələr (${mine.length})</h3>
+      ${mine.map(q=>`<div class="row" onclick="openResolveModal('${q.id}')" style="cursor:pointer"><b>Qaimə_${q.no}</b> — ${q.problem.text}</div>`).join('')}
+      <button class="sec" style="margin-top:10px" onclick="mine.forEach(m=>dismissed.add(m.id));closeModal()">Bağla</button>
+    </div></div>`;
+  }
+}
+
+// ---------- STATS ----------
+function viewStats(){
+  const total = qaimeler.length;
+  const byStatus = {yeni:0, islemede:0, medaxil:0};
+  qaimeler.forEach(q=>byStatus[q.status]=(byStatus[q.status]||0)+1);
+  const problemli = qaimeler.filter(hasOpenProblem).length;
+  const tecili = qaimeler.filter(isTecili).length;
+
+  // last 7 days
+  const days = [...Array(7)].map((_,i)=>{ const d=new Date(); d.setDate(d.getDate()-i); return d; }).reverse();
+  const dayCounts = days.map(d=> qaimeler.filter(q=>{ if(!q.createdAt) return false; const qd=q.createdAt.toDate?q.createdAt.toDate():new Date(q.createdAt); return qd.toDateString()===d.toDateString(); }).length);
+  const maxC = Math.max(1,...dayCounts);
+  const chart = `<div class="bar-chart">${days.map((d,i)=>`<div class="small">${d.toLocaleDateString('az-AZ',{weekday:'short',day:'numeric'})}</div><div class="bg"><div class="fg" style="width:${(dayCounts[i]/maxC*100)||2}%">${dayCounts[i]}</div></div>`).join('')}</div>`;
+
+  let personal = '';
+  if(currentUser.role==='sifarisci'){
+    const mine = qaimeler.filter(q=>q.sifarisVeren===currentUser.name);
+    const today = mine.filter(q=>isToday(q.createdAt)).length;
+    personal = `<div class="card"><h3>Mənim Statistikam</h3><div>Ümumi əlavə etdiyim: ${mine.length}</div><div>Bugün: ${today}</div></div>`;
+  }
+  if(currentUser.role==='anbar'){
+    const myWork = qaimeler.filter(q=>q.isleyen===currentUser.name);
+    const myMedaxilToday = myWork.filter(q=>q.status==='medaxil' && isToday(q.tookAt)).length;
+    const myActive = myWork.filter(q=>q.status==='islemede').length;
+    personal = `<div class="card"><h3>Mənim Statistikam</h3><div>Hazırda işlədiyim: ${myActive}</div><div>Bugün mədaxil etdiyim: ${myMedaxilToday}</div></div>`;
+  }
+
+  let anbarTable = '';
+  if(currentUser.role==='anbar' || currentUser.role==='korporativ'){
+    const workers = [...new Set(qaimeler.map(q=>q.isleyen).filter(Boolean))];
+    const weekAgo = Date.now()-7*86400000;
+    const rows = workers.map(w=>{
+      const wq = qaimeler.filter(q=>q.isleyen===w);
+      const active = wq.filter(q=>q.status==='islemede').length;
+      const medToday = wq.filter(q=>q.status==='medaxil' && isToday(q.tookAt)).length;
+      const medWeek = wq.filter(q=>q.status==='medaxil' && q.tookAt && (q.tookAt.toDate?q.tookAt.toDate():new Date(q.tookAt)).getTime()>weekAgo).length;
+      return `<tr><td>${w}</td><td>${active}</td><td>${medToday}</td><td>${medWeek}</td></tr>`;
+    }).join('');
+    anbarTable = `<div class="card"><h3>Anbar İşçiləri</h3><table><tr><th>Ad</th><th>Hazırda işlədiyi</th><th>Bugün mədaxil</th><th>Həftəlik mədaxil</th></tr>${rows}</table></div>`;
+  }
+
+  return `<div class="card"><h3>Ümumi Vəziyyət</h3>
+    <div>Ümumi qaimə: ${total}</div>
+    <div>Yeni: ${byStatus.yeni||0} | İşləmədə: ${byStatus.islemede||0} | Mədaxil olan: ${byStatus.medaxil||0}</div>
+    <div>Təcili: ${tecili} | Problemli: ${problemli}</div>
+    <h4>Son 7 gün</h4>${chart}
+  </div>
+  ${personal}
+  ${anbarTable}`;
+}
+</script>
+</body>
+</html>
