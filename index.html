@@ -72,7 +72,10 @@ td,th{border:1px solid #ddd;padding:6px;text-align:left}
     <div class="tabs" id="modeSwitch"></div>
     <div class="tabs" id="navTabs"></div>
   </div>
-  <div id="userInfo"></div>
+  <div style="display:flex;align-items:center;gap:10px">
+    <div id="bellWrap"></div>
+    <div id="userInfo"></div>
+  </div>
 </header>
 <main id="main"></main>
 </div>
@@ -131,6 +134,8 @@ async function doLogin(){
   }
   const d = snap.data();
   const roles = d.roles || (d.role ? [d.role] : []);
+  if(roles.includes('admin')){ location.href = 'admin.html'; return; }
+  if(roles.includes('korporativ')){ location.href = 'korporativ.html'; return; }
   currentUser = {username:u, roles, mode:roles[0], name:d.name};
   localStorage.setItem('cu', JSON.stringify(currentUser));
   boot();
@@ -150,6 +155,7 @@ function boot(){
   db.collection('qaimeler').orderBy('createdAt','desc').onSnapshot(snap=>{
     qaimeler = snap.docs.map(d=>({id:d.id, ...d.data()}));
     render();
+    renderBell();
     cleanupOld();
     if(currentUser.roles.includes('sifarisci')) checkNotifications();
   });
@@ -172,8 +178,6 @@ function setupNav(){
   let tabs = [];
   if(currentUser.mode==='sifarisci') tabs=[['add','Qaimə Əlavə Et'],['mine','Mənim Qaimlərim'],['stats','Analitika']];
   if(currentUser.mode==='anbar') tabs=[['list','Qaimlər'],['stats','Analitika']];
-  if(currentUser.mode==='korporativ') tabs=[['korp','Qaimlər']];
-  if(currentUser.mode==='admin') tabs=[['stats','Analitika']];
   curNav = tabs[0][0];
   const el = document.getElementById('navTabs');
   el.innerHTML = tabs.map(t=>`<button data-n="${t[0]}" onclick="setNav('${t[0]}')">${t[1]}</button>`).join('');
@@ -206,20 +210,19 @@ function cleanupOld(){
 
 // ---------- RENDER ROOT ----------
 function render(){
+  const af = document.activeElement;
+  const afId = af && af.id, afStart = af && af.selectionStart, afEnd = af && af.selectionEnd;
   document.querySelectorAll('#navTabs button').forEach(b=>b.classList.toggle('active', b.dataset.n===curNav));
   const m = document.getElementById('main');
   if(currentUser.mode==='sifarisci'){
     if(curNav==='add') m.innerHTML = viewAddForm();
     else if(curNav==='mine') m.innerHTML = viewMine();
     else m.innerHTML = viewStats();
-  } else if(currentUser.mode==='anbar'){
+  } else {
     if(curNav==='list') m.innerHTML = viewAnbarList();
     else m.innerHTML = viewStats();
-  } else if(currentUser.mode==='korporativ'){
-    m.innerHTML = viewKorporativ();
-  } else {
-    m.innerHTML = viewStats();
   }
+  if(afId){ const el=document.getElementById(afId); if(el && el.focus){ el.focus(); if(afStart!=null && el.setSelectionRange) try{el.setSelectionRange(afStart,afEnd);}catch(e){} } }
 }
 
 // ---------- ADD QAIME (Sifarişçi) ----------
@@ -350,18 +353,6 @@ function filterByTab(tab){
   return qaimeler.filter(q=>q.status==='yeni' && !hasOpenProblem(q)); // aktiv = Mədaxil olunmayanlar
 }
 
-// ---------- KORPORATIV ----------
-function viewKorporativ(){
-  const search = document.getElementById('korpSearch')?.value || '';
-  let list = qaimeler.filter(q=>q.status==='medaxil');
-  if(search) list = list.filter(q=> (q.kimUcun||'').toLowerCase().includes(search.toLowerCase()) || String(q.no).includes(search));
-  return `<div class="card">
-    <h3>Mədaxil Olunmuş Qaimlər</h3>
-    <input id="korpSearch" placeholder="Axtar (ad / qaimə №)" value="${search}" oninput="render()">
-    <div style="margin-top:10px">${listHead()}${list.map(q=>rowHtml(q)).join('') || '<div class="small">Yoxdur</div>'}</div>
-  </div>`;
-}
-
 // ---------- ROW ----------
 function listHead(){
   return `<div class="line-grid small" style="font-weight:bold;padding:4px 8px">
@@ -376,10 +367,9 @@ function listHead(){
 function rowHtml(q, anbarMode){
   const tecili = isTecili(q);
   const problem = hasOpenProblem(q);
-  const isKorp = currentUser.mode==='korporativ';
   const checkbox = (anbarMode && curTab==='aktiv') ? `<input type="checkbox" style="width:auto" ${selected.has(q.id)?'checked':''} onclick="event.stopPropagation();toggleSel('${q.id}')">` : '';
-  const mainPhotos = isKorp ? (q.medaxilPhotos||[]) : (q.photos||[]);
-  const thumb = mainPhotos[0] ? `<img class="thumb" src="${mainPhotos[0]}" onclick="event.stopPropagation();openViewer(${JSON.stringify(mainPhotos).replace(/"/g,'&quot;')},0)">` : '';
+  const photos = q.photos||[];
+  const thumb = photos[0] ? `<img class="thumb" src="${photos[0]}" onclick="event.stopPropagation();openViewer(${JSON.stringify(photos).replace(/"/g,'&quot;')},0)">` : '';
   return `<div class="row ${tecili?'tecili':''}">
     <div class="line" onclick="toggleDetails('${q.id}')">
       <div class="line-grid">
@@ -392,10 +382,10 @@ function rowHtml(q, anbarMode){
       </div>
       <div class="line-extras">
         ${problem?'<span class="badge">Problem</span>':''}
-        ${q.status==='yeni'?'<span class="small">işlənməyi gözləyir</span>':''}
-        ${(!isKorp && q.photosUploading)?'<span class="small">şəkil yüklənir...</span>':''}
-        ${q.medaxilPhotosUploading?'<span class="small">mədaxil şəkli yüklənir...</span>':''}
         ${thumb}
+        ${q.status==='yeni'?'<span class="small">işlənməyi gözləyir</span>':''}
+        ${q.photosUploading?'<span class="small">şəkil yüklənir...</span>':''}
+        ${q.medaxilPhotosUploading?'<span class="small">mədaxil şəkli yüklənir...</span>':''}
       </div>
     </div>
     <div class="details hidden" id="det_${q.id}">
@@ -403,7 +393,7 @@ function rowHtml(q, anbarMode){
       <div>Status: ${statusLabel(q.status)}${q.isleyen?(' — İşləyir: '+q.isleyen):''}</div>
       ${q.qeyd?`<div>Qeyd: ${q.qeyd}</div>`:''}
       ${q.medaxilNo?`<div>Mədaxil №: ${q.medaxilNo}</div>`:''}
-      ${(!isKorp && q.medaxilPhotos && q.medaxilPhotos[0]) ? `<div style="margin-top:6px">Mədaxil şəkli: <img class="thumb" src="${q.medaxilPhotos[0]}" onclick="openViewer(${JSON.stringify(q.medaxilPhotos).replace(/"/g,'&quot;')},0)"></div>`:''}
+      ${q.medaxilPhotos && q.medaxilPhotos[0] ? `<div style="margin-top:6px">Mədaxil şəkli: <img class="thumb" src="${q.medaxilPhotos[0]}" onclick="openViewer(${JSON.stringify(q.medaxilPhotos).replace(/"/g,'&quot;')},0)"></div>`:''}
       ${problem?`<div style="color:#c0392b">Problem: ${q.problem.text}</div>`:''}
       ${q.problem && q.problem.solved?`<div style="color:green">Həll: ${q.problem.solution}</div>`:''}
       ${anbarActions(q)}
@@ -479,29 +469,53 @@ async function bulkTake(){
   render();
 }
 
-// ---------- PHOTO VIEWER ----------
+// ---------- PHOTO VIEWER (scroll/pinch ilə yaxınlaşdırma) ----------
 function openViewer(photos, idx){
-  let rotate = 0, scale = 1;
+  let rotate = 0, scale = 1, pinchDist = null;
   const root = document.getElementById('modalRoot');
-  function draw(){
-    root.innerHTML = `<div id="viewerModal">
-      <div class="bar">
-        <button class="sec" onclick="closeModal()">Bağla</button>
-        <button onclick="viewerNav(-1)">◀</button>
-        <span style="color:#fff;align-self:center">${idx+1}/${photos.length}</span>
-        <button onclick="viewerNav(1)">▶</button>
-        <button onclick="viewerRotate()">⟳ Döndər</button>
-        <button onclick="viewerZoom(0.2)">＋</button>
-        <button onclick="viewerZoom(-0.2)">－</button>
-        <a href="${dlUrl(photos[idx])}"><button>Yüklə</button></a>
-      </div>
-      <img src="${photos[idx]}" style="transform:rotate(${rotate}deg) scale(${scale})">
-    </div>`;
+  root.innerHTML = `<div id="viewerModal">
+    <div class="bar">
+      <button class="sec" onclick="closeModal()">Bağla</button>
+      <button id="vPrev">◀</button>
+      <span id="vCount" style="color:#fff;align-self:center"></span>
+      <button id="vNext">▶</button>
+      <button id="vRotate">⟳ Döndər</button>
+      <a id="vDl"><button>Yüklə</button></a>
+    </div>
+    <div id="vWrap" style="flex:1;overflow:hidden;display:flex;touch-action:none">
+      <img id="vImg" style="max-width:100%;max-height:80vh;margin:auto">
+    </div>
+  </div>`;
+  const img = document.getElementById('vImg');
+  function update(){
+    img.src = photos[idx];
+    img.style.transform = `rotate(${rotate}deg) scale(${scale})`;
+    document.getElementById('vCount').innerText = (idx+1)+'/'+photos.length;
+    document.getElementById('vDl').href = dlUrl(photos[idx]);
   }
-  window.viewerNav = d=>{ idx=(idx+d+photos.length)%photos.length; rotate=0; scale=1; draw(); };
-  window.viewerRotate = ()=>{ rotate=(rotate+90)%360; draw(); };
-  window.viewerZoom = d=>{ scale=Math.max(0.5,Math.min(4,scale+d)); draw(); };
-  draw();
+  document.getElementById('vPrev').onclick = ()=>{ idx=(idx-1+photos.length)%photos.length; rotate=0; scale=1; update(); };
+  document.getElementById('vNext').onclick = ()=>{ idx=(idx+1)%photos.length; rotate=0; scale=1; update(); };
+  document.getElementById('vRotate').onclick = ()=>{ rotate=(rotate+90)%360; update(); };
+  const wrap = document.getElementById('vWrap');
+  wrap.addEventListener('wheel', e=>{
+    e.preventDefault();
+    scale = Math.max(0.5, Math.min(5, scale + (e.deltaY<0?0.15:-0.15)));
+    img.style.transform = `rotate(${rotate}deg) scale(${scale})`;
+  }, {passive:false});
+  wrap.addEventListener('touchmove', e=>{
+    if(e.touches.length===2){
+      e.preventDefault();
+      const dx = e.touches[0].clientX-e.touches[1].clientX, dy = e.touches[0].clientY-e.touches[1].clientY;
+      const dist = Math.hypot(dx,dy);
+      if(pinchDist!=null){
+        scale = Math.max(0.5, Math.min(5, scale*(dist/pinchDist)));
+        img.style.transform = `rotate(${rotate}deg) scale(${scale})`;
+      }
+      pinchDist = dist;
+    }
+  }, {passive:false});
+  wrap.addEventListener('touchend', ()=>{ pinchDist=null; });
+  update();
 }
 function closeModal(){ document.getElementById('modalRoot').innerHTML=''; medPicked=[]; }
 
@@ -603,6 +617,34 @@ async function saveResolve(id){
   await db.collection('qaimeler').doc(id).update({problem:{text:q.problem.text, solved:true, solution:sol}});
   dismissed.add(id);
   closeModal();
+}
+
+// ---------- KORPORATIV MESAJ BİLDİRİŞLƏRİ (Anbar üçün) ----------
+function anbarMessages(){
+  if(!currentUser.roles || !currentUser.roles.includes('anbar')) return [];
+  const out = [];
+  qaimeler.forEach(q=>{
+    if(q.isleyen===currentUser.name && q.korpMessages && q.korpMessages.length){
+      q.korpMessages.forEach(m=> out.push({...m, qno:q.no, qid:q.id}));
+    }
+  });
+  out.sort((a,b)=> new Date(b.createdAt)-new Date(a.createdAt));
+  return out;
+}
+function renderBell(){
+  const el = document.getElementById('bellWrap');
+  if(!el) return;
+  const msgs = anbarMessages();
+  if(!currentUser.roles.includes('anbar') || msgs.length===0){ el.innerHTML=''; return; }
+  el.innerHTML = `<button onclick="openBell()">🔔 Bildirişlər <span class="badge">${msgs.length}</span></button>`;
+}
+function openBell(){
+  const msgs = anbarMessages();
+  document.getElementById('modalRoot').innerHTML = `<div class="modal"><div class="box">
+    <h3>Korporativdən Bildirişlər</h3>
+    ${msgs.map(m=>`<div class="row"><b>Qaimə_${m.qno}</b> — ${fmtDate(m.createdAt)}<div>Ad: ${m.ad}</div><div>Mesaj: ${m.text}</div></div>`).join('') || '<div class="small">Yoxdur</div>'}
+    <button class="sec" style="margin-top:10px" onclick="closeModal()">Bağla</button>
+  </div></div>`;
 }
 
 // ---------- NOTIFICATIONS ----------
