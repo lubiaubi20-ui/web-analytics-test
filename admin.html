@@ -120,8 +120,11 @@ if(currentUser) boot();
 function setNav(n){ curNav=n; render(); }
 
 function render(){
+  const af = document.activeElement;
+  const afId = af && af.id, afStart = af && af.selectionStart, afEnd = af && af.selectionEnd;
   document.querySelectorAll('#navTabs button').forEach(b=>b.classList.toggle('active', b.dataset.n===curNav));
   document.getElementById('main').innerHTML = curNav==='users' ? viewUsers() : viewQaimeler();
+  if(afId){ const el=document.getElementById(afId); if(el){ el.focus(); if(afStart!=null) try{el.setSelectionRange(afStart,afEnd);}catch(e){} } }
 }
 
 // ---------- İSTİFADƏÇİLƏR ----------
